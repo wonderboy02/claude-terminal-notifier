@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Manage multiple terminal input requests with a queue system",
   "publisher": "local",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/wonderboy02/claude-terminal-notifier"

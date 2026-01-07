@@ -39,6 +39,8 @@ code --install-extension claude-terminal-notifier-1.0.0.vsix
 
 **중요**: 이 확장 프로그램이 작동하려면 Claude Code hook을 설정해야 합니다.
 
+### Windows 사용자
+
 `~/.claude/settings.json`에 다음을 추가하세요:
 
 ```json
@@ -49,7 +51,7 @@ code --install-extension claude-terminal-notifier-1.0.0.vsix
         "hooks": [
           {
             "type": "command",
-            "command": "curl -X POST http://localhost:57843/addRequest --max-time 1 -s || true"
+            "command": "powershell -Command \"foreach ($port in 57843..57852) { try { Invoke-WebRequest -Uri \\\"http://localhost:$port/addRequest\\\" -Method POST -Body \\\"workspace=$PWD\\\" -TimeoutSec 0.1 -ErrorAction SilentlyContinue | Out-Null; break } catch {} }\""
           }
         ]
       }
@@ -59,7 +61,38 @@ code --install-extension claude-terminal-notifier-1.0.0.vsix
         "hooks": [
           {
             "type": "command",
-            "command": "curl -X POST http://localhost:57843/addRequest --max-time 1 -s || true"
+            "command": "powershell -Command \"foreach ($port in 57843..57852) { try { Invoke-WebRequest -Uri \\\"http://localhost:$port/addRequest\\\" -Method POST -Body \\\"workspace=$PWD\\\" -TimeoutSec 0.1 -ErrorAction SilentlyContinue | Out-Null; break } catch {} }\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Linux/macOS 사용자
+
+`~/.claude/settings.json`에 다음을 추가하세요:
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for port in {57843..57852}; do curl -X POST \"http://localhost:$port/addRequest\" --data \"workspace=$PWD\" --max-time 0.1 -s 2>/dev/null && break || true; done"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for port in {57843..57852}; do curl -X POST \"http://localhost:$port/addRequest\" --data \"workspace=$PWD\" --max-time 0.1 -s 2>/dev/null && break || true; done"
           }
         ]
       }
@@ -69,6 +102,14 @@ code --install-extension claude-terminal-notifier-1.0.0.vsix
 ```
 
 **설정 수정 후**: Hook이 적용되려면 Claude Code를 재시작해야 합니다.
+
+### 동작 원리
+
+- 확장 프로그램은 포트 57843-57852 범위에서 사용 가능한 포트를 자동으로 찾습니다
+- Hook은 모든 포트에 순차적으로 요청을 보내고, 성공하면 중단합니다
+- 각 요청에는 현재 워크스페이스 경로(`$PWD`)가 포함됩니다
+- 각 VS Code 창은 자신의 워크스페이스와 일치하는 요청만 처리합니다
+- **여러 VS Code 창을 동시에 사용할 수 있습니다!**
 
 ## 📖 사용 방법
 
@@ -99,27 +140,46 @@ Claude Code 없이 확장 프로그램 테스트:
 ## 🎯 작동 원리
 
 ```
-┌─────────────┐
-│ Claude Code │ ──> 작업 완료
-└─────────────┘
+┌─────────────────────────────┐
+│ Claude Code (워크스페이스 A)  │ ──> 작업 완료
+└─────────────────────────────┘
        │
        ▼
-  Hook 실행 ──> curl POST to localhost:57843
+  Hook 실행 ──> 모든 포트에 순차 요청
+                (workspace=/path/to/A 포함)
        │
-       ▼
-┌──────────────┐
-│  확장 프로그램  │ ──> 터미널을 큐에 추가
-└──────────────┘
-       │
-       ▼
+    ┌──┴────────────┬──────────────┐
+    ▼               ▼              ▼
+┌────────┐      ┌────────┐    ┌────────┐
+│VS Code │      │VS Code │    │VS Code │
+│ 창 1   │      │ 창 2   │    │ 창 3   │
+│:57843  │      │:57844  │    │:57845  │
+│/proj-A │ ✅   │/proj-B │ ⏭️  │/proj-C │ ⏭️
+└────────┘      └────────┘    └────────┘
+    │
+    ▼
+  워크스페이스 매칭 확인
+    │
+    ▼
+  터미널을 큐에 추가
+    │
+    ▼
   상태 표시줄 업데이트: 💬 Claude 입력 대기: 1
-       │
-       ▼
+    │
+    ▼
   사용자가 클릭하거나 Ctrl+Shift+I 입력
-       │
-       ▼
+    │
+    ▼
   터미널로 포커스 이동 ✅
 ```
+
+### 멀티 윈도우 지원
+
+여러 VS Code 창을 동시에 사용할 때:
+- 각 창은 다른 포트(57843-57852)를 자동으로 할당받습니다
+- Hook은 모든 포트에 워크스페이스 정보와 함께 요청을 보냅니다
+- 각 창은 자신의 워크스페이스와 일치하는 요청만 처리합니다
+- 다른 창의 작업에 방해받지 않습니다!
 
 ## 🔧 문제 해결
 

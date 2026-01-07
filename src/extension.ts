@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as http from 'http';
+import * as net from 'net';
 import { TerminalQueueManager } from './queue-manager';
 import { StatusBarManager } from './status-bar-manager';
 import { TerminalDetector } from './terminal-detector';
@@ -7,6 +8,159 @@ import { TerminalDetector } from './terminal-detector';
 let queueManager: TerminalQueueManager;
 let statusBarManager: StatusBarManager;
 let httpServer: http.Server | undefined;
+
+// 포트 범위 설정
+const PORT_RANGE_START = 57843;
+const PORT_RANGE_END = 57852;
+
+/**
+ * 포트가 사용 가능한지 확인
+ */
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+
+    server.once('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(false);
+      } else {
+        resolve(false);
+      }
+    });
+
+    server.once('listening', () => {
+      server.close();
+      resolve(true);
+    });
+
+    server.listen(port, 'localhost');
+  });
+}
+
+/**
+ * 사용 가능한 포트 찾기
+ */
+async function findAvailablePort(): Promise<number> {
+  for (let port = PORT_RANGE_START; port <= PORT_RANGE_END; port++) {
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+  }
+  throw new Error(`모든 포트(${PORT_RANGE_START}-${PORT_RANGE_END})가 사용 중입니다`);
+}
+
+/**
+ * 현재 워크스페이스 경로 가져오기
+ */
+function getCurrentWorkspacePath(): string | undefined {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders || workspaceFolders.length === 0) {
+    return undefined;
+  }
+  // 첫 번째 워크스페이스 폴더 사용
+  return workspaceFolders[0].uri.fsPath;
+}
+
+/**
+ * 워크스페이스 경로 정규화 (대소문자, 슬래시 통일)
+ */
+function normalizePath(path: string): string {
+  return path.toLowerCase()
+             .replace(/\\/g, '/')
+             .replace(/\/$/, '');
+}
+
+/**
+ * 요청된 워크스페이스와 현재 워크스페이스가 일치하는지 확인
+ */
+function isWorkspaceMatch(requestedWorkspace: string | null): boolean {
+  if (!requestedWorkspace) {
+    // 워크스페이스 정보가 없으면 일치하는 것으로 처리 (하위 호환성)
+    return true;
+  }
+
+  const currentWorkspace = getCurrentWorkspacePath();
+  if (!currentWorkspace) {
+    return false;
+  }
+
+  return normalizePath(requestedWorkspace) === normalizePath(currentWorkspace);
+}
+
+/**
+ * HTTP 서버 시작 (동적 포트 + 워크스페이스 매칭)
+ */
+async function startHttpServer(context: vscode.ExtensionContext) {
+  try {
+    // 사용 가능한 포트 찾기
+    const port = await findAvailablePort();
+    const workspacePath = getCurrentWorkspacePath() || 'No Workspace';
+
+    httpServer = http.createServer((req, res) => {
+      // CORS 헤더
+      res.setHeader('Access-Control-Allow-Origin', '*');
+
+      if (req.method === 'POST' && req.url === '/addRequest') {
+        let body = '';
+
+        // 요청 body 수신
+        req.on('data', (chunk) => {
+          body += chunk.toString();
+        });
+
+        req.on('end', () => {
+          // body 파싱: workspace=/path/to/project
+          const params = new URLSearchParams(body);
+          const requestedWorkspace = params.get('workspace');
+
+          console.log(`[HTTP Server] Hook 요청 수신 - Requested: ${requestedWorkspace}, Current: ${workspacePath}`);
+
+          // 워크스페이스 매칭 확인
+          if (isWorkspaceMatch(requestedWorkspace)) {
+            // 이 워크스페이스의 요청!
+            console.log(`[HTTP Server] ✅ 워크스페이스 일치! 터미널 추가`);
+            vscode.commands.executeCommand('claude-terminal-queue.addRequestFromHook');
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('OK');
+          } else {
+            // 다른 워크스페이스의 요청, 무시
+            console.log(`[HTTP Server] ⏭️ 워크스페이스 불일치, 무시`);
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end('SKIP');
+          }
+        });
+      } else {
+        res.writeHead(404);
+        res.end('Not Found');
+      }
+    });
+
+    httpServer.listen(port, 'localhost', () => {
+      console.log(`[HTTP Server] 🚀 시작됨: http://localhost:${port} (워크스페이스: ${workspacePath})`);
+      vscode.window.showInformationMessage(
+        `✅ Claude Terminal Queue 활성화! (포트: ${port})`
+      );
+    });
+
+    httpServer.on('error', (err: any) => {
+      console.error('[HTTP Server] ❌ 에러:', err);
+      vscode.window.showErrorMessage(`HTTP 서버 시작 실패: ${err.message}`);
+    });
+
+    // Extension 종료 시 서버 종료
+    context.subscriptions.push({
+      dispose: () => {
+        if (httpServer) {
+          httpServer.close();
+          console.log('[HTTP Server] 종료됨');
+        }
+      }
+    });
+  } catch (error) {
+    console.error('[HTTP Server] ❌ 포트 할당 실패:', error);
+    vscode.window.showErrorMessage(`HTTP 서버 시작 실패: ${error}`);
+  }
+}
 
 /**
  * Extension 활성화
@@ -152,14 +306,6 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        // 터미널이 이미 focus되어 있으면 추가하지 않음
-        // (사용자가 이미 보고 있는 터미널에 알림 불필요)
-        const isTerminalVisible = vscode.window.terminals.includes(terminal);
-        if (isTerminalVisible && terminal === vscode.window.activeTerminal) {
-          console.log(`[Hook] 터미널 "${terminal.name}"이 이미 focus됨 - 무시`);
-          return;
-        }
-
         // 큐에 추가 (조용히, 알림 없이)
         // queue-manager에서 중복 체크를 하므로 여기서는 하지 않음
         queueManager.enqueue(terminal, '사용자 입력이 필요합니다');
@@ -180,39 +326,8 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  // HTTP 서버 시작 (Hook 통신용)
-  const PORT = 57843; // 고정 포트 (충돌 방지를 위해 높은 번호 사용)
-
-  httpServer = http.createServer((req, res) => {
-    // CORS 헤더 (필요 시)
-    res.setHeader('Access-Control-Allow-Origin', '*');
-
-    if (req.method === 'POST' && req.url === '/addRequest') {
-      // Hook에서 요청이 들어옴
-      console.log('[HTTP Server] Hook 요청 수신');
-
-      // 명령어 실행
-      vscode.commands.executeCommand('claude-terminal-queue.addRequestFromHook');
-
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('OK');
-    } else {
-      res.writeHead(404);
-      res.end('Not Found');
-    }
-  });
-
-  httpServer.listen(PORT, 'localhost', () => {
-    console.log(`[HTTP Server] 시작됨: http://localhost:${PORT}`);
-  });
-
-  httpServer.on('error', (err: any) => {
-    if (err.code === 'EADDRINUSE') {
-      console.log(`[HTTP Server] 포트 ${PORT}가 이미 사용 중입니다. 다른 Extension 인스턴스가 실행 중일 수 있습니다.`);
-    } else {
-      console.error('[HTTP Server] 에러:', err);
-    }
-  });
+  // HTTP 서버 시작 (Hook 통신용) - 동적 포트 할당
+  startHttpServer(context);
 
   // 등록
   context.subscriptions.push(
@@ -223,20 +338,7 @@ export function activate(context: vscode.ExtensionContext) {
     addRequestFromHookCommand,
     terminalCloseListener,
     queueManager,
-    statusBarManager,
-    {
-      dispose: () => {
-        if (httpServer) {
-          httpServer.close();
-          console.log('[HTTP Server] 종료됨');
-        }
-      }
-    }
-  );
-
-  // 초기 메시지
-  vscode.window.showInformationMessage(
-    '✅ Claude Terminal Queue Manager 활성화! (Ctrl+Shift+I로 다음 요청으로 이동)'
+    statusBarManager
   );
 }
 

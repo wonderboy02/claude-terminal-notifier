@@ -1,0 +1,65 @@
+{
+  "name": "claude-terminal-notifier",
+  "displayName": "Claude Terminal Queue Manager",
+  "version": "1.0.0",
+  "description": "Manage multiple terminal input requests with a queue system",
+  "publisher": "local",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wonderboy02/claude-terminal-notifier"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claude-terminal-queue.nextInQueue",
+        "title": "Claude: Go to Next Input Request"
+      },
+      {
+        "command": "claude-terminal-queue.simulateRequest",
+        "title": "Claude: Simulate Input Request (Test)"
+      },
+      {
+        "command": "claude-terminal-queue.clearQueue",
+        "title": "Claude: Clear All Requests"
+      },
+      {
+        "command": "claude-terminal-queue.addRequestFromHook",
+        "title": "Claude: Add Request from Hook (Internal)"
+      },
+      {
+        "command": "claude-terminal-queue.debugTerminals",
+        "title": "Claude: Debug Terminal Info"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "claude-terminal-queue.nextInQueue",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i",
+        "when": "editorTextFocus || terminalFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -watch",
+    "package": "vsce package",
+    "test": "node dist/terminal-test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.22.0",
+    "typescript": "^5.3.0"
+  }
+}

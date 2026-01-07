@@ -27,6 +27,13 @@ export class TerminalQueueManager {
    * 새로운 입력 요청을 큐에 추가
    */
   public enqueue(terminal: vscode.Terminal, question: string = '입력이 필요합니다'): void {
+    // 중복 체크: 이미 큐에 있는 터미널이면 추가하지 않음
+    const alreadyInQueue = this.queue.some(req => req.terminal === terminal);
+    if (alreadyInQueue) {
+      console.log(`[Queue] 이미 큐에 있음 - 무시: ${terminal.name}`);
+      return;
+    }
+
     const request: TerminalInputRequest = {
       terminal,
       question,

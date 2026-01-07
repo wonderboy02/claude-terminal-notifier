@@ -10,7 +10,16 @@ export class TerminalDetector {
    */
   static async getTerminalCwd(terminal: vscode.Terminal): Promise<string | undefined> {
     try {
-      // 터미널 프로세스 ID 가져오기
+      // 방법 1: Shell Integration API 사용 (가장 정확함!)
+      // VS Code 1.72+ 부터 사용 가능
+      if (terminal.shellIntegration?.cwd) {
+        const cwdUri = terminal.shellIntegration.cwd;
+        const cwd = cwdUri.fsPath;
+        console.log(`[TerminalDetector] Shell Integration CWD: ${cwd}`);
+        return cwd;
+      }
+
+      // 방법 2: 프로세스 ID로 조회 (fallback)
       const processId = await terminal.processId;
       if (!processId) {
         return undefined;
@@ -19,15 +28,17 @@ export class TerminalDetector {
       // Windows: PowerShell로 프로세스 CWD 조회
       if (process.platform === 'win32') {
         return new Promise((resolve) => {
-          const cmd = `powershell -Command "(Get-Process -Id ${processId}).Path | Split-Path -Parent"`;
+          // 수정: CommandLine에서 작업 디렉토리 추출 시도
+          const cmd = `powershell -Command "Get-CimInstance Win32_Process -Filter \\"ProcessId = ${processId}\\" | Select-Object -ExpandProperty CommandLine"`;
 
           child_process.exec(cmd, (error, stdout) => {
             if (error) {
               console.log(`[TerminalDetector] CWD 조회 실패:`, error);
               resolve(undefined);
             } else {
-              const cwd = stdout.trim();
-              resolve(cwd || undefined);
+              const cmdLine = stdout.trim();
+              console.log(`[TerminalDetector] CommandLine: ${cmdLine}`);
+              resolve(undefined); // CommandLine에서 CWD 추출은 복잡하므로 일단 undefined
             }
           });
         });

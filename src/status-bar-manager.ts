@@ -30,9 +30,10 @@ export class StatusBarManager {
       this.statusBarItem.hide();
     } else {
       // 큐에 항목이 있으면 표시
-      this.statusBarItem.text = `$(bell) 입력 대기: ${count}`;
-      this.statusBarItem.tooltip = `클릭 또는 Ctrl+Shift+I로 다음 터미널로 이동\n대기 중: ${count}개`;
-      this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+      // Claude Code 스타일: 대화 아이콘 + 오렌지/코랄 색상
+      this.statusBarItem.text = `$(comment-discussion) Claude 입력 대기: ${count}`;
+      this.statusBarItem.tooltip = `Claude Code가 응답을 기다리고 있습니다\n클릭 또는 Ctrl+Shift+I로 터미널로 이동\n대기 중: ${count}개`;
+      this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
       this.statusBarItem.show();
 
       console.log(`[StatusBar] 업데이트: ${count}개 대기 중`);

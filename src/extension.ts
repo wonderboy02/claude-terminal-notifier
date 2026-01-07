@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
+import * as http from 'http';
 import { TerminalQueueManager } from './queue-manager';
 import { StatusBarManager } from './status-bar-manager';
 import { TerminalDetector } from './terminal-detector';
 
 let queueManager: TerminalQueueManager;
 let statusBarManager: StatusBarManager;
+let httpServer: http.Server | undefined;
 
 /**
  * Extension 활성화
@@ -50,14 +52,8 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      // 해당 터미널로 포커스 이동
+      // 해당 터미널로 포커스 이동 (입력 없이 포커스만)
       request.terminal.show(true); // preserveFocus = false
-
-      // 터미널에 눈에 띄는 메시지 표시
-      request.terminal.sendText('\n\x1b[43m\x1b[30m\x1b[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m');
-      request.terminal.sendText('\x1b[43m\x1b[30m\x1b[1m  ⚠️  입력이 필요합니다!  \x1b[0m');
-      request.terminal.sendText(`\x1b[43m\x1b[30m\x1b[1m  ${request.question}\x1b[0m`);
-      request.terminal.sendText('\x1b[43m\x1b[30m\x1b[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n');
 
       // 큐에서 제거
       queueManager.dequeue();
@@ -156,16 +152,16 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        // 이 터미널이 현재 workspace에 속하는지 확인
-        const isInWorkspace = await TerminalDetector.isTerminalInCurrentWorkspace(terminal);
-
-        if (!isInWorkspace) {
-          // 조용히 무시 (로그만)
-          console.log(`[Hook] 터미널 "${terminal.name}"은 다른 workspace에 속함 - 무시`);
+        // 터미널이 이미 focus되어 있으면 추가하지 않음
+        // (사용자가 이미 보고 있는 터미널에 알림 불필요)
+        const isTerminalVisible = vscode.window.terminals.includes(terminal);
+        if (isTerminalVisible && terminal === vscode.window.activeTerminal) {
+          console.log(`[Hook] 터미널 "${terminal.name}"이 이미 focus됨 - 무시`);
           return;
         }
 
         // 큐에 추가 (조용히, 알림 없이)
+        // queue-manager에서 중복 체크를 하므로 여기서는 하지 않음
         queueManager.enqueue(terminal, '사용자 입력이 필요합니다');
 
         console.log(`[Hook] 터미널 추가됨: ${terminal.name} (총 ${queueManager.length}개)`);
@@ -184,6 +180,40 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
+  // HTTP 서버 시작 (Hook 통신용)
+  const PORT = 57843; // 고정 포트 (충돌 방지를 위해 높은 번호 사용)
+
+  httpServer = http.createServer((req, res) => {
+    // CORS 헤더 (필요 시)
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    if (req.method === 'POST' && req.url === '/addRequest') {
+      // Hook에서 요청이 들어옴
+      console.log('[HTTP Server] Hook 요청 수신');
+
+      // 명령어 실행
+      vscode.commands.executeCommand('claude-terminal-queue.addRequestFromHook');
+
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('OK');
+    } else {
+      res.writeHead(404);
+      res.end('Not Found');
+    }
+  });
+
+  httpServer.listen(PORT, 'localhost', () => {
+    console.log(`[HTTP Server] 시작됨: http://localhost:${PORT}`);
+  });
+
+  httpServer.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`[HTTP Server] 포트 ${PORT}가 이미 사용 중입니다. 다른 Extension 인스턴스가 실행 중일 수 있습니다.`);
+    } else {
+      console.error('[HTTP Server] 에러:', err);
+    }
+  });
+
   // 등록
   context.subscriptions.push(
     nextInQueueCommand,
@@ -193,7 +223,15 @@ export function activate(context: vscode.ExtensionContext) {
     addRequestFromHookCommand,
     terminalCloseListener,
     queueManager,
-    statusBarManager
+    statusBarManager,
+    {
+      dispose: () => {
+        if (httpServer) {
+          httpServer.close();
+          console.log('[HTTP Server] 종료됨');
+        }
+      }
+    }
   );
 
   // 초기 메시지

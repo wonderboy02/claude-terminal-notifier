@@ -1,0 +1,36 @@
+# Source files
+src/**
+tsconfig.json
+.gitignore
+.gitattributes
+
+# Build artifacts
+*.vsix
+
+# Node modules
+node_modules/**
+
+# Git
+.git/**
+.github/**
+
+# Tests
+test/**
+**/test/**
+
+# Markdown (except README)
+HOW_IT_WORKS.md
+INSTALL.md
+QUICKSTART.md
+
+# Development
+.vscode/**
+*.code-workspace
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
